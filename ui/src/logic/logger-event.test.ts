@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { is_same_candidate, parse_logger_candidate } from './logger-event';
+import {
+	candidate_involves_family,
+	family_names_match,
+	is_same_candidate,
+	parse_logger_candidate
+} from './logger-event';
 
 describe('logger event parsing', () => {
 	it('parses a structured candidate with a variable name count', () => {
@@ -47,5 +52,26 @@ describe('logger event parsing', () => {
 		};
 
 		expect(is_same_candidate(candidate, { ...candidate })).toBe(true);
+	});
+
+	it('keeps only candidates involving the configured family', () => {
+		const candidate = {
+			names: [{ name: 'EnemyFamily' }, { name: 'MyFamily' }, { name: 'SomeGuild' }]
+		};
+
+		expect(candidate_involves_family(candidate, ' myfamily ')).toBe(true);
+		expect(candidate_involves_family(candidate, 'SomeoneElse')).toBe(false);
+		expect(candidate_involves_family(candidate, '')).toBe(false);
+	});
+
+	it('filters parsed log rows using the same exact family-name match', () => {
+		expect(
+			candidate_involves_family({ names: ['MyFamily', 'EnemyFamily', 'SomeGuild'] }, 'MYFAMILY')
+		).toBe(true);
+		expect(candidate_involves_family({ names: ['MyFamilyAlt', 'EnemyFamily'] }, 'MyFamily')).toBe(
+			false
+		);
+		expect(family_names_match('MyFamily', ' myfamily ')).toBe(true);
+		expect(family_names_match('MyFamilyAlt', 'MyFamily')).toBe(false);
 	});
 });

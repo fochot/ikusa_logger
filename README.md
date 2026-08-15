@@ -30,9 +30,13 @@ nodejs libcap python3 patchelf
    - Windows: `ikusa-logger-win_x64.exe` located in `/dist/ikusa-logger/`
    - Linux: `start.sh`
 2. Click on the `Record` button
-3. After you are done recording, make sure to order the names of the players in the correct order!
+3. Enter your exact BDO family name in the `Personal` panel. `Only my fights` is
+   enabled by default, so unrelated combat candidates are ignored. The match is
+   case-insensitive and applies to the live view, statistics, saved logs, uploads,
+   live output, imported PCAPs, and previously saved logs.
+4. After you are done recording, make sure to order the names of the players in the correct order!
 The order should be: `Family-Name-1 kills/died to Family-Name-2 from Enemy-Guild`
-4. Download the logs by clicking `Save` or upload the logs directly to the website by clicking `Upload`
+5. Download the logs by clicking `Save` or upload the logs directly to the website by clicking `Upload`
 
 If you noticed that you have chosen the wrong name order, you can open the `.log` file again with the logger and adjust the names.
 

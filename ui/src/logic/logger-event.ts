@@ -70,3 +70,30 @@ export function is_same_candidate(left: LogType, right: LogType) {
 		left.names.every((name, index) => name.name === right.names[index].name)
 	);
 }
+
+type NamedLog = {
+	names: Array<string | { name: string }>;
+};
+
+function normalize_family_name(name: string) {
+	return name.trim().toLowerCase();
+}
+
+export function family_names_match(left: string, right: string) {
+	const target = normalize_family_name(right);
+	return target.length > 0 && normalize_family_name(left) === target;
+}
+
+/**
+ * Keep only combat candidates that contain the configured family name.
+ *
+ * The role offsets can move after a BDO patch, so this deliberately checks
+ * every extracted name instead of assuming that the family is already at a
+ * known index. The editor can then be used to select the correct roles.
+ */
+export function candidate_involves_family(log: NamedLog, family_name: string) {
+	return log.names.some((entry) => {
+		const name = typeof entry === 'string' ? entry : entry.name;
+		return family_names_match(name, family_name);
+	});
+}
