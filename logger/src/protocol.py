@@ -10,14 +10,15 @@ from typing import Hashable
 
 EVENT_PREFIX = "IKUSA_EVENT "
 
-# This is the original combat-record signature. Only the server address is
-# dynamic; the logger intentionally keeps the old, narrow payload contract.
-HEADER_PATTERN = re.compile(rb"[\x50-\x6f]\x01\x00..", re.DOTALL)
+# The opcode byte can change in a BDO patch. The stable 0x01/0x00 portion is
+# preferred, while the exact five-name record shape remains authoritative.
+HEADER_PATTERN = re.compile(rb".\x01\x00..", re.DOTALL)
 NAME_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]{2,15}$")
 RECORD_BYTES = 300
 EXPECTED_NAMES = 5
 MAX_NAME_LENGTH = 16
 MAX_STREAM_BUFFER = RECORD_BYTES * 8
+MIN_NAME_SPAN = 120
 _ALLOWED_NAME_BYTES = frozenset(
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
 )
@@ -91,7 +92,12 @@ def extract_utf16le_names(payload: bytes) -> list[NameMatch]:
 
 
 def extract_candidate_records(payload: bytes, final: bool = False) -> list[CandidateRecord]:
-    """Return only complete records matching the original combat format."""
+    """Return complete records matching the original combat-data shape.
+
+    A patch may change the leading opcode. In that case the fallback aligns a
+    window from the five widely spaced name fields that the original record
+    contains. It does not accept arbitrary or short name groups.
+    """
 
     del final  # Incomplete records were never emitted by the original parser.
     candidates: list[CandidateRecord] = []
@@ -105,6 +111,30 @@ def extract_candidate_records(payload: bytes, final: bool = False) -> list[Candi
         window = payload[start : start + RECORD_BYTES]
         names = extract_utf16le_names(window)
         if len(names) != EXPECTED_NAMES:
+            continue
+
+        candidates.append(
+            CandidateRecord(window[:5].hex(), tuple(names), window)
+        )
+        next_allowed_start = start + RECORD_BYTES
+
+    if candidates:
+        return candidates
+
+    # The stable header may also change. Keep this fallback limited to the
+    # original record length, exact field count, and broad field distribution.
+    all_names = extract_utf16le_names(payload)
+    next_allowed_start = 0
+    for first_name in all_names:
+        start = max(0, first_name.offset - 6)
+        if start < next_allowed_start or len(payload) - start < RECORD_BYTES:
+            continue
+
+        window = payload[start : start + RECORD_BYTES]
+        names = extract_utf16le_names(window)
+        if len(names) != EXPECTED_NAMES:
+            continue
+        if names[-1].offset - names[0].offset < MIN_NAME_SPAN:
             continue
 
         candidates.append(

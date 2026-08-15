@@ -45,8 +45,9 @@ no longer require hard-coded address ranges. UDP, authentication, launcher, web,
 other game-process connections are not inspected.
 
 Captured TCP fragments are reassembled per connection, but a row is emitted only when
-it matches the original 300-byte combat record, original header, and exactly five valid
-name fields. The logger does not fall back to scanning arbitrary groups of names.
+it matches the original 300-byte combat record and exactly five valid, widely spaced
+name fields. The opcode byte and record header may change between BDO patches, so the
+parser can realign that same strict record shape without scanning arbitrary name groups.
 
 For the best result, start Black Desert and enter a game channel before clicking
 `Record`. The developer console prints the detected endpoints and the active capture

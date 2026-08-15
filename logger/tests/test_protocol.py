@@ -4,10 +4,14 @@ import unittest
 from src.protocol import EVENT_PREFIX, StreamScanner, extract_candidate_records
 
 
-def make_record(names, header=bytes.fromhex("630100af12")):
+def make_record(
+    names,
+    header=bytes.fromhex("630100af12"),
+    offsets=(6, 100, 170, 210, 270),
+):
     payload = bytearray(300)
     payload[:5] = header
-    for offset, name in zip((6, 100, 170, 210, 270), names):
+    for offset, name in zip(offsets, names):
         encoded = name.encode("utf-16le") + b"\0\0"
         payload[offset : offset + len(encoded)] = encoded
     return bytes(payload)
@@ -37,17 +41,35 @@ class ProtocolScannerTests(unittest.TestCase):
         self.assertEqual([name.name for name in records[0].names], list(self.names))
         self.assertEqual(scanner.feed("server-flow", b"noise"), [])
 
-    def test_rejects_changed_headers_and_general_name_groups(self):
+    def test_accepts_changed_header_with_original_record_shape(self):
         payload = make_record(self.names, header=bytes.fromhex("990203aabb"))
+
+        records = extract_candidate_records(payload)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual([name.name for name in records[0].names], list(self.names))
+
+    def test_rejects_dense_general_name_groups(self):
+        payload = make_record(
+            self.names,
+            header=bytes.fromhex("990203aabb"),
+            offsets=(6, 30, 55, 80, 105),
+        )
 
         self.assertEqual(extract_candidate_records(payload), [])
 
     def test_requires_exactly_five_original_style_names(self):
         four_names = make_record(self.names[:4])
         lowercase_name = make_record(("guild", *self.names[1:]))
+        six_names = make_record(
+            (*self.names, "ExtraName"),
+            header=bytes.fromhex("990203aabb"),
+            offsets=(6, 70, 125, 175, 225, 270),
+        )
 
         self.assertEqual(extract_candidate_records(four_names), [])
         self.assertEqual(extract_candidate_records(lowercase_name), [])
+        self.assertEqual(extract_candidate_records(six_names), [])
 
     def test_event_keeps_original_hex_offsets(self):
         record = extract_candidate_records(make_record(self.names))[0]
