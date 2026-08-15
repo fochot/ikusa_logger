@@ -7,7 +7,6 @@
 		get_formatted_date,
 		calculate_kd,
 		PERSONAL_FAMILY_NAME_KEY,
-		PERSONAL_ONLY_KEY,
 		type Log
 	} from './config';
 	import { filesystem, os, storage } from '@neutralinojs/lib';
@@ -17,8 +16,6 @@
 	import Button from '../../svelte-ui/elements/button.svelte';
 	import GuildInfos from './guild-infos.svelte';
 	import { onMount } from 'svelte';
-	import Checkbox from '../../svelte-ui/elements/checkbox.svelte';
-	import { candidate_involves_family, family_names_match } from '../../logic/logger-event';
 
 	export let logs: Log[];
 	export let height = 155;
@@ -26,21 +23,10 @@
 
 	const personal_stats_storage_key = PERSONAL_FAMILY_NAME_KEY;
 	let personal_family_name = '';
-	let personal_only = true;
-	let personal_preferences_loaded = false;
-	let tracked_logs: Log[] = [];
 
 	let player_one_index = 0;
 	let player_two_index = 1;
 	let guild_index = 2;
-
-	$: tracked_logs = personal_only
-		? logs.filter((log) => candidate_involves_family(log, personal_family_name))
-		: logs;
-
-	$: if (personal_preferences_loaded) {
-		storage.setData(PERSONAL_ONLY_KEY, String(personal_only)).catch(() => null);
-	}
 
 	function update_names(target: 'player_one' | 'player_two' | 'guild', e: Event) {
 		if (target === 'player_one') {
@@ -71,7 +57,7 @@
 	}
 
 	function get_logs_string() {
-		return tracked_logs
+		return logs
 			.map((log) => {
 				const remaining_indicies = log.names
 					.map((_, index) => index)
@@ -108,9 +94,9 @@
 		}
 	}
 
-	$: disabled = tracked_logs.length === 0 || loading;
+	$: disabled = logs.length === 0 || loading;
 
-	$: own_guild_member_count = tracked_logs.reduce((players, log) => {
+	$: own_guild_member_count = logs.reduce((players, log) => {
 		const name = log.names[player_one_index];
 		if (!players.includes(name)) {
 			players.push(name);
@@ -118,7 +104,7 @@
 		return players;
 	}, [] as string[]).length;
 
-	$: enemy_count = tracked_logs.reduce((players, log) => {
+	$: enemy_count = logs.reduce((players, log) => {
 		const name = log.names[player_two_index];
 		if (!players.includes(name)) {
 			players.push(name);
@@ -126,7 +112,7 @@
 		return players;
 	}, [] as string[]).length;
 
-	$: alliance_overview = tracked_logs.reduce(
+	$: alliance_overview = logs.reduce(
 		(acc, log) => {
 			if (log.kill) {
 				acc.own.kills += 1;
@@ -146,12 +132,12 @@
 	$: personal_stats = (() => {
 		const name = personal_family_name.trim();
 		if (!name) return { kills: 0, deaths: 0 };
-		return tracked_logs.reduce(
+		return logs.reduce(
 			(acc, log) => {
 				const killer = log.kill ? log.names[player_one_index] : log.names[player_two_index];
 				const victim = log.kill ? log.names[player_two_index] : log.names[player_one_index];
-				if (family_names_match(killer, name)) acc.kills += 1;
-				if (family_names_match(victim, name)) acc.deaths += 1;
+				if (killer === name) acc.kills += 1;
+				if (victim === name) acc.deaths += 1;
 				return acc;
 			},
 			{ kills: 0, deaths: 0 }
@@ -178,13 +164,10 @@
 
 	onMount(async () => {
 		personal_family_name = await storage.getData(personal_stats_storage_key).catch(() => '');
-		const stored_personal_only = await storage.getData(PERSONAL_ONLY_KEY).catch(() => '');
-		personal_only = stored_personal_only !== 'false';
-		personal_preferences_loaded = true;
 	});
 </script>
 
-{#if tracked_logs.length > 0}
+{#if logs.length > 0}
 	<span class="absolute top-2 left-0 right-0 text-center text-gray-400 text-sm"
 		>Adjust the Logs to: <b>Family-Name-1</b> kills/died to
 		<b>Family-Name-2</b> from <b>Guild</b></span
@@ -192,33 +175,23 @@
 {/if}
 <div class="flex flex-col gap-2 items-center w-full h-full relative">
 	<div class="flex gap-1 items-center justify-start w-full">
-		<p class="text-xs sm:text-sm text-gray-300">
-			{tracked_logs.length} tracked{#if personal_only} / {logs.length} loaded{/if}
-		</p>
-		<div class="ml-2">
-			<Checkbox bind:checked={personal_only} />
-			<span>Only my fights</span>
-		</div>
+		<p class="text-xs sm:text-sm text-gray-300">{logs.length} logs</p>
 	</div>
 	<div class="w-full flex gap-2 pb-14" style="height: {height}px;">
 		<div
 			class="w-[550px] flex-shrink-0 rounded-lg border border-gray-700 overflow-hidden p-2 relative h-full"
 		>
-			{#if loading && tracked_logs.length === 0}
+			{#if loading && logs.length === 0}
 				<div class="absolute inset-0 flex justify-center items-center mb-14">
 					<LoadingIndicator />
 				</div>
-			{:else if tracked_logs.length === 0 && !loading}
+			{:else if logs.length === 0 && !loading}
 				<div class="absolute inset-0 flex items-center justify-center">
-					<p class="text-gray-400">
-						{personal_only && !personal_family_name.trim()
-							? 'Enter your family name to filter this log.'
-							: 'No matching logs.'}
-					</p>
+					<p class="text-gray-400">Waiting for logs...</p>
 				</div>
 			{/if}
-			{#key tracked_logs.length === 0}
-				<VirtualList items={tracked_logs} let:item={log}>
+			{#key logs.length === 0}
+				<VirtualList items={logs} let:item={log}>
 					<div class="flex gap-2 group py-1 items-center px-1">
 						<p class="text-sm text-gray-400">{log.time}</p>
 						<!-- <p>{log.names[player_one_index].name}</p> -->
@@ -258,7 +231,7 @@
 						class="bg-gray-700 px-1.5 py-0.5 rounded"
 						on:click={() => {
 							ModalManager.open(GuildInfos, {
-								logs: tracked_logs,
+								logs: logs,
 								guild_index,
 								player_one_index,
 								player_two_index
@@ -266,7 +239,7 @@
 						}}>Details</button
 					>
 				</div>
-				{#if tracked_logs.length === 0}
+				{#if logs.length === 0}
 					<p class="text-gray-500">No logs yet</p>
 				{:else}
 					<p class="text-gray-400">{own_guild_member_count} vs {enemy_count} players</p>
@@ -294,9 +267,6 @@
 					value={personal_family_name}
 					on:input={handle_personal_family_name_input}
 				/>
-				<p class="text-gray-500 mb-1.5">
-					{personal_only ? 'Only matching fights are tracked.' : 'All loaded fights are tracked.'}
-				</p>
 				{#if !personal_family_name.trim()}
 					<p class="text-gray-500">Enter your family name</p>
 				{:else}
@@ -313,7 +283,7 @@
 			</div>
 			<div class="rounded-lg border border-gray-700 p-2.5">
 				<p class="uppercase tracking-wide text-gray-400 mb-2">K/D Breakdown</p>
-				{#if tracked_logs.length === 0}
+				{#if logs.length === 0}
 					<p class="text-gray-500">No logs yet</p>
 				{:else}
 					<div class="mb-3">

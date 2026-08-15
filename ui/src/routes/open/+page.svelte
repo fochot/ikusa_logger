@@ -67,7 +67,7 @@
 			combat_logs = combat_logs;
 		} else {
 			is_network = true;
-			capture_status = 'Analyzing TCP and UDP streams...';
+			capture_status = 'Analyzing the original BDO TCP combat stream...';
 			start_logger(
 				logger_callback,
 				'analyze',

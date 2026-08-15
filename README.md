@@ -30,23 +30,23 @@ nodejs libcap python3 patchelf
    - Windows: `ikusa-logger-win_x64.exe` located in `/dist/ikusa-logger/`
    - Linux: `start.sh`
 2. Click on the `Record` button
-3. Enter your exact BDO family name in the `Personal` panel. `Only my fights` is
-   enabled by default, so unrelated combat candidates are ignored. The match is
-   case-insensitive and applies to the live view, statistics, saved logs, uploads,
-   live output, imported PCAPs, and previously saved logs.
-4. After you are done recording, make sure to order the names of the players in the correct order!
+3. After you are done recording, make sure to order the names of the players in the correct order!
 The order should be: `Family-Name-1 kills/died to Family-Name-2 from Enemy-Guild`
-5. Download the logs by clicking `Save` or upload the logs directly to the website by clicking `Upload`
+4. Download the logs by clicking `Save` or upload the logs directly to the website by clicking `Upload`
 
 If you noticed that you have chosen the wrong name order, you can open the `.log` file again with the logger and adjust the names.
 
 ## Network detection
 
-The logger detects active connections owned by `BlackDesert64.exe` and captures their
-remote IP addresses and ports automatically. TCP port `8889` is retained as a fallback,
-but server IP ranges are not hard-coded. Both TCP and UDP payloads are inspected and
-transport streams are reassembled separately, so a server or channel change cannot mix
-two packet streams together.
+The logger keeps the original narrow capture behavior: it reads only incoming TCP
+traffic from Black Desert's world server on port `8889`. It detects the current remote
+IP and local connection port from `BlackDesert64.exe`, so server and channel IP changes
+no longer require hard-coded address ranges. UDP, authentication, launcher, web, and
+other game-process connections are not inspected.
+
+Captured TCP fragments are reassembled per connection, but a row is emitted only when
+it matches the original 300-byte combat record, original header, and exactly five valid
+name fields. The logger does not fall back to scanning arbitrary groups of names.
 
 For the best result, start Black Desert and enter a game channel before clicking
 `Record`. The developer console prints the detected endpoints and the active capture

@@ -44,8 +44,6 @@ def _ip_addresses(package) -> tuple[str, str] | None:
 def _transport(package):
     if "TCP" in package:
         return "tcp", package["TCP"]
-    if "UDP" in package:
-        return "udp", package["UDP"]
     return None
 
 
@@ -61,7 +59,9 @@ def package_handler(package, output="", ip_filter=False):
     source_port = int(layer.sport)
     destination_port = int(layer.dport)
 
-    if ip_filter and not packet_matches_endpoints(
+    # Always keep the original direction and world-server scope. The option is
+    # retained only for CLI compatibility with existing UI builds.
+    if not packet_matches_endpoints(
         source_ip,
         destination_ip,
         source_port,
@@ -103,7 +103,7 @@ def open_pcap(file, output, ip_filter=False):
 
     _reset_scanner()
     print("Reading " + file, flush=True)
-    print("Capture mode: offline TCP and UDP protocol discovery", flush=True)
+    print("Capture mode: original BDO combat stream (incoming TCP 8889)", flush=True)
 
     if os.name == "nt":
         print("Loading file into ram. This may take a while.", flush=True)
@@ -115,7 +115,7 @@ def open_pcap(file, output, ip_filter=False):
     else:
         sniff(
             offline=file,
-            filter="tcp or udp",
+            filter=build_capture_filter([]),
             prn=lambda package: package_handler(package, output, ip_filter),
             store=0,
         )

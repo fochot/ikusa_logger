@@ -35,10 +35,10 @@ def _address_parts(address) -> tuple[str, int]:
 
 
 def discover_game_endpoints() -> list[GameEndpoint]:
-    """Return active remote endpoints owned by a Black Desert game process.
+    """Return active BDO world-server connections owned by the game process.
 
     psutil is deliberately optional. Packaged builds include it, while source
-    checkouts can still fall back to capture-time payload discovery.
+    checkouts can still fall back to the established TCP world-server port.
     """
 
     try:
@@ -55,16 +55,21 @@ def discover_game_endpoints() -> list[GameEndpoint]:
                 continue
 
             for connection in process.net_connections(kind="inet"):
-                local_ip, local_port = _address_parts(connection.laddr)
-                remote_ip, remote_port = _address_parts(connection.raddr)
-                is_udp = connection.type == socket.SOCK_DGRAM
-                if (not remote_ip or not remote_port) and not (is_udp and local_port):
+                # The original logger reads combat notifications from the BDO
+                # world-server TCP stream. Other game-process connections are
+                # launcher, authentication, web, or telemetry traffic and must
+                # not be passed to the combat parser.
+                if connection.type != socket.SOCK_STREAM:
                     continue
 
-                protocol = "tcp" if connection.type == socket.SOCK_STREAM else "udp"
+                local_ip, local_port = _address_parts(connection.laddr)
+                remote_ip, remote_port = _address_parts(connection.raddr)
+                if not remote_ip or remote_port not in DEFAULT_GAME_PORTS:
+                    continue
+
                 endpoints.add(
                     GameEndpoint(
-                        protocol=protocol,
+                        protocol="tcp",
                         remote_ip=remote_ip,
                         remote_port=remote_port,
                         local_ip=local_ip,
@@ -79,23 +84,26 @@ def discover_game_endpoints() -> list[GameEndpoint]:
 
 
 def build_capture_filter(endpoints: Iterable[GameEndpoint]) -> str:
-    """Build a BPF filter without relying on a hard-coded server IP range."""
+    """Capture only incoming packets from the active BDO world server."""
 
-    endpoint_list = list(endpoints)
-    clauses = {f"port {port}" for port in DEFAULT_GAME_PORTS}
+    clauses: set[str] = set()
 
-    for endpoint in endpoint_list:
-        if endpoint.remote_ip and endpoint.remote_port:
-            clauses.add(f"(host {endpoint.remote_ip} and port {endpoint.remote_port})")
-        elif endpoint.protocol == "udp" and endpoint.local_port:
-            clauses.add(f"(udp and port {endpoint.local_port})")
+    for endpoint in endpoints:
+        if (
+            endpoint.protocol != "tcp"
+            or not endpoint.remote_ip
+            or endpoint.remote_port not in DEFAULT_GAME_PORTS
+        ):
+            continue
+        clause = f"(src host {endpoint.remote_ip} and src port {endpoint.remote_port}"
+        if endpoint.local_port:
+            clause += f" and dst port {endpoint.local_port}"
+        clauses.add(clause + ")")
 
-    if not endpoint_list:
-        # If process discovery is unavailable, capture both transports. The
-        # protocol scanner will discard traffic that has no BDO-like records.
-        return "tcp or udp"
+    if not clauses:
+        return "tcp and src port 8889"
 
-    return f"(tcp or udp) and ({' or '.join(sorted(clauses))})"
+    return f"tcp and ({' or '.join(sorted(clauses))})"
 
 
 def packet_matches_endpoints(
@@ -105,38 +113,34 @@ def packet_matches_endpoints(
     destination_port: int,
     endpoints: Iterable[GameEndpoint],
 ) -> bool:
-    endpoint_list = list(endpoints)
+    endpoint_list = [
+        endpoint
+        for endpoint in endpoints
+        if endpoint.protocol == "tcp"
+        and endpoint.remote_ip
+        and endpoint.remote_port in DEFAULT_GAME_PORTS
+    ]
     if not endpoint_list:
-        return True
+        return source_port in DEFAULT_GAME_PORTS
 
     for endpoint in endpoint_list:
-        if endpoint.remote_ip and endpoint.remote_port:
-            remote_matches = endpoint.remote_ip in {source_ip, destination_ip}
-            port_matches = endpoint.remote_port in {source_port, destination_port}
-            if remote_matches and port_matches:
-                return True
-        elif endpoint.protocol == "udp" and endpoint.local_port in {
-            source_port,
-            destination_port,
-        }:
+        remote_matches = source_ip == endpoint.remote_ip
+        remote_port_matches = source_port == endpoint.remote_port
+        local_port_matches = not endpoint.local_port or destination_port == endpoint.local_port
+        if remote_matches and remote_port_matches and local_port_matches:
             return True
 
-    return destination_port in DEFAULT_GAME_PORTS or source_port in DEFAULT_GAME_PORTS
+    return False
 
 
 def describe_endpoints(endpoints: Iterable[GameEndpoint]) -> str:
     endpoint_list = list(endpoints)
     if not endpoint_list:
-        return "no Black Desert process endpoints found; scanning TCP and UDP payloads"
+        return "game process not found; using incoming TCP port 8889 fallback"
 
     descriptions = []
     for endpoint in endpoint_list:
-        if endpoint.remote_ip and endpoint.remote_port:
-            descriptions.append(
-                f"{endpoint.protocol.upper()} {endpoint.remote_ip}:{endpoint.remote_port}"
-            )
-        else:
-            descriptions.append(
-                f"{endpoint.protocol.upper()} local port {endpoint.local_port}"
-            )
+        descriptions.append(
+            f"TCP {endpoint.remote_ip}:{endpoint.remote_port} -> local port {endpoint.local_port}"
+        )
     return ", ".join(descriptions)
