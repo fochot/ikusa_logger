@@ -36,6 +36,28 @@ The order should be: `Family-Name-1 kills/died to Family-Name-2 from Enemy-Guild
 
 If you noticed that you have chosen the wrong name order, you can open the `.log` file again with the logger and adjust the names.
 
+## Network detection
+
+The logger detects active connections owned by `BlackDesert64.exe` and captures their
+remote IP addresses and ports automatically. TCP port `8889` is retained as a fallback,
+but server IP ranges are not hard-coded. Both TCP and UDP payloads are inspected and
+transport streams are reassembled separately, so a server or channel change cannot mix
+two packet streams together.
+
+For the best result, start Black Desert and enter a game channel before clicking
+`Record`. The developer console prints the detected endpoints and the active capture
+filter.
+
+If traffic is captured but no combat entries are found, create a short diagnostic PCAP
+while reproducing one kill/death event:
+
+```bash
+logger.exe --record --allInterfaces --output bdo-diagnostic
+```
+
+This creates `bdo-diagnostic.pcap`. Packet captures can contain IP addresses and other
+network metadata, so only share them privately with a developer you trust.
+
 https://github.com/sch-28/ikusa_logger/assets/42447473/ebcd67f0-c43a-4d12-b38d-79a7542e92ed
 
 ## Startup Issue

@@ -70,17 +70,17 @@ kill 		= 	<Select
 player_one 	= 	<Select
 			options={options.possible_name_offsets[options.player_one_index].map((entry) => entry.offset)}
 			selected_value={options.name_indicies[options.player_one_index]}
-			on_change={(e) => update_name_index(0, e)}
+			on_change={(e) => update_name_index(options.player_one_index, e)}
 		/>
 player_two 	= 	<Select
 			options={options.possible_name_offsets[options.player_two_index].map((entry) => entry.offset)}
 			selected_value={options.name_indicies[options.player_two_index]}
-			on_change={(e) => update_name_index(1, e)}
+			on_change={(e) => update_name_index(options.player_two_index, e)}
 		/>
 guild 		= 	<Select
 			options={options.possible_name_offsets[options.guild_index].map((entry) => entry.offset)}
 			selected_value={options.name_indicies[options.guild_index]}
-			on_change={(e) => update_name_index(2, e)}
+			on_change={(e) => update_name_index(options.guild_index, e)}
 		/>
 </pre>
 {/if}

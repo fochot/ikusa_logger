@@ -1,7 +1,7 @@
 <script lang="ts">
 	import VirtualList from '@sveltejs/svelte-virtual-list';
 	import { onDestroy, onMount } from 'svelte';
-	import { scrollbar_width } from '../../logic/util';
+	import { scrollbar_width } from '../util';
 	import { TableSort, type HeaderColumn, type Row, type RowObject } from './table';
 	import FaSort from 'svelte-icons/fa/FaSort.svelte';
 	import FaSortUp from 'svelte-icons/fa/FaSortUp.svelte';
@@ -211,7 +211,7 @@
 	}
 
 	function scroll_top(y: number) {
-		if (v_list) setTimeout(() => v_list.scrollTo({ top: y, behavior: 'smooth'}), 20);
+		if (v_list) setTimeout(() => v_list.scrollTo({ top: y, behavior: 'smooth' }), 20);
 	}
 </script>
 

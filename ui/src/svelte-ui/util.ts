@@ -23,12 +23,12 @@ export async function sleep(ms?: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export const click_outside: Action = (node) => {
+export const click_outside: Action<HTMLElement, () => void> = (node, on_click_outside) => {
 	const handle_click = (event: MouseEvent) =>
 		node &&
 		!node.contains(event.target as HTMLElement) &&
 		!event.defaultPrevented &&
-		node.dispatchEvent(new CustomEvent('click_outside', node as any));
+		on_click_outside?.();
 
 	document.addEventListener('click', handle_click, true);
 

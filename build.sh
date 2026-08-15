@@ -16,7 +16,7 @@ cd logger || error_exit "Logger directory missing"
 log "Creating a virtual environment and installing dependencies..."
 python3 -m venv .venv || error_exit "Failed to create virtual environment."
 source .venv/bin/activate || error_exit "Failed to activate virtual environment."
-pip install scapy pyinstaller  || error_exit "Failed to install dependencies."
+pip install -r requirements.txt || error_exit "Failed to install dependencies."
 
 
 log "Building the logger..."

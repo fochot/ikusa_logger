@@ -5,8 +5,12 @@ function handle_process(evt: CustomEvent) {
 	if (logger && logger.id == evt.detail.id) {
 		switch (evt.detail.action) {
 			case 'stdOut':
-				console.log(evt.detail.data.trim());
-				callback?.(evt.detail.data.trim(), 'running');
+				for (const line of evt.detail.data.split(/\r?\n/)) {
+					const data = line.trim();
+					if (!data) continue;
+					console.log(data);
+					callback?.(data, 'running');
+				}
 				break;
 			case 'stdErr':
 				alert(

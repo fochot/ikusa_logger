@@ -38,7 +38,7 @@ if args.status:
     status_check.check_health()
     exit()
 elif args.record:
-    record.record(args.output)
+    record.record(args.output, args.allInterfaces)
     exit()
 
 elif args.update:

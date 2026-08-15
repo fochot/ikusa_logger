@@ -59,9 +59,9 @@
 	function get_logs_string() {
 		return logs
 			.map((log) => {
-				const remaining_indicies = [0, 1, 2, 3, 4].filter(
-					(i) => i !== player_one_index && i !== player_two_index && i !== guild_index
-				);
+				const remaining_indicies = log.names
+					.map((_, index) => index)
+					.filter((i) => i !== player_one_index && i !== player_two_index && i !== guild_index);
 				const remaining_names = remaining_indicies.map((i) => log.names[i]);
 				const characters = ` (${remaining_names.join(',')})`;
 				return `[${log.time}] ${log.names[player_one_index]} ${
@@ -178,47 +178,49 @@
 		<p class="text-xs sm:text-sm text-gray-300">{logs.length} logs</p>
 	</div>
 	<div class="w-full flex gap-2 pb-14" style="height: {height}px;">
-		<div class="w-[550px] flex-shrink-0 rounded-lg border border-gray-700 overflow-hidden p-2 relative h-full">
-		{#if loading && logs.length === 0}
-			<div class="absolute inset-0 flex justify-center items-center mb-14">
-				<LoadingIndicator />
-			</div>
-		{:else if logs.length === 0 && !loading}
-			<div class="absolute inset-0 flex items-center justify-center">
-				<p class="text-gray-400">Waiting for logs...</p>
-			</div>
-		{/if}
-		{#key logs.length === 0}
-			<VirtualList items={logs} let:item={log}>
-				<div class="flex gap-2 group py-1 items-center px-1">
-					<p class="text-sm text-gray-400">{log.time}</p>
-					<!-- <p>{log.names[player_one_index].name}</p> -->
-					<Select
-						options={log.names}
-						selected_value={player_one_index}
-						on_change={(e) => update_names('player_one', e)}
-					/>
-					<div class="flex justify-center items-center w-16">
-						{#if log.kill}
-							<p class="self-center text-submarine-500">killed</p>
-						{:else}
-							<p class="self-center text-red-500">died to</p>
-						{/if}
-					</div>
-					<Select
-						options={log.names}
-						selected_value={player_two_index}
-						on_change={(e) => update_names('player_two', e)}
-					/>
-					<p class="text-sm text-gray-400">from</p>
-					<Select
-						options={log.names}
-						selected_value={guild_index}
-						on_change={(e) => update_names('guild', e)}
-					/>
+		<div
+			class="w-[550px] flex-shrink-0 rounded-lg border border-gray-700 overflow-hidden p-2 relative h-full"
+		>
+			{#if loading && logs.length === 0}
+				<div class="absolute inset-0 flex justify-center items-center mb-14">
+					<LoadingIndicator />
 				</div>
-			</VirtualList>
-		{/key}
+			{:else if logs.length === 0 && !loading}
+				<div class="absolute inset-0 flex items-center justify-center">
+					<p class="text-gray-400">Waiting for logs...</p>
+				</div>
+			{/if}
+			{#key logs.length === 0}
+				<VirtualList items={logs} let:item={log}>
+					<div class="flex gap-2 group py-1 items-center px-1">
+						<p class="text-sm text-gray-400">{log.time}</p>
+						<!-- <p>{log.names[player_one_index].name}</p> -->
+						<Select
+							options={log.names}
+							selected_value={player_one_index}
+							on_change={(e) => update_names('player_one', e)}
+						/>
+						<div class="flex justify-center items-center w-16">
+							{#if log.kill}
+								<p class="self-center text-submarine-500">killed</p>
+							{:else}
+								<p class="self-center text-red-500">died to</p>
+							{/if}
+						</div>
+						<Select
+							options={log.names}
+							selected_value={player_two_index}
+							on_change={(e) => update_names('player_two', e)}
+						/>
+						<p class="text-sm text-gray-400">from</p>
+						<Select
+							options={log.names}
+							selected_value={guild_index}
+							on_change={(e) => update_names('guild', e)}
+						/>
+					</div>
+				</VirtualList>
+			{/key}
 		</div>
 		<!-- Stats panel fills the remaining right space -->
 		<div class="flex-1 flex flex-col gap-2 text-xs h-full overflow-y-auto">
@@ -246,9 +248,15 @@
 						<span class="text-gray-500 mx-1">·</span>
 						<span class="text-red-500">D {alliance_overview.own.deaths}</span>
 						<span class="text-gray-500 mx-1">·</span>
-						<span class="font-semibold">{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span>
+						<span class="font-semibold"
+							>{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span
+						>
 					</p>
-					<p class="text-gray-400 mt-0.5">Enemy K/D: <span class="font-semibold text-foreground-secondary">{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span></p>
+					<p class="text-gray-400 mt-0.5">
+						Enemy K/D: <span class="font-semibold text-foreground-secondary"
+							>{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span
+						>
+					</p>
 				{/if}
 			</div>
 			<div class="rounded-lg border border-gray-700 p-2.5">
@@ -267,7 +275,9 @@
 						<span class="text-gray-500 mx-1">·</span>
 						<span class="text-red-500">D {personal_stats.deaths}</span>
 						<span class="text-gray-500 mx-1">·</span>
-						<span class="font-semibold">{calculate_kd(personal_stats.kills, personal_stats.deaths)}</span>
+						<span class="font-semibold"
+							>{calculate_kd(personal_stats.kills, personal_stats.deaths)}</span
+						>
 					</p>
 				{/if}
 			</div>
@@ -279,10 +289,12 @@
 					<div class="mb-3">
 						<div class="flex justify-between mb-1">
 							<span class="text-gray-400">Your Alliance</span>
-							<span class="font-semibold">{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span>
+							<span class="font-semibold"
+								>{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span
+							>
 						</div>
 						<div class="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-							<div class="h-full bg-submarine-500 transition-all" style="width: {ownKillPct}%"></div>
+							<div class="h-full bg-submarine-500 transition-all" style="width: {ownKillPct}%" />
 						</div>
 						<div class="flex justify-between mt-1 text-gray-500">
 							<span class="text-submarine-500">K {alliance_overview.own.kills}</span>
@@ -292,10 +304,12 @@
 					<div>
 						<div class="flex justify-between mb-1">
 							<span class="text-gray-400">Enemy</span>
-							<span class="font-semibold">{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span>
+							<span class="font-semibold"
+								>{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span
+							>
 						</div>
 						<div class="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-							<div class="h-full bg-red-500 transition-all" style="width: {enemyKillPct}%"></div>
+							<div class="h-full bg-red-500 transition-all" style="width: {enemyKillPct}%" />
 						</div>
 						<div class="flex justify-between mt-1 text-gray-500">
 							<span class="text-submarine-500">K {alliance_overview.enemy.kills}</span>

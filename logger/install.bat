@@ -1,1 +1,1 @@
-python -m venv .venv  && .venv\Scripts\activate &&  pip install scapy pyinstaller && CALL build
+python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt && CALL build

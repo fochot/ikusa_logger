@@ -29,6 +29,7 @@
 	export let logs: LogType[];
 	export let height = 155;
 	export let loading = false;
+	export let status_message = 'Waiting for logs...';
 
 	let possible_name_offsets: { offset: number; count: number }[][] = [];
 	let name_indicies: number[] = [0, 0, 0, 0, 0];
@@ -76,7 +77,10 @@
 		auto_scroll && setTimeout(scroll);
 
 		if (logs.length < 50 || logs.length % 100 === 0) {
-			possible_kill_offsets = find_kill_offset(logs).map((offset) => offset);
+			const detected_kill_offsets = find_kill_offset(logs);
+			if (detected_kill_offsets.length > 0) {
+				possible_kill_offsets = detected_kill_offsets;
+			}
 			calculate_config();
 		} else {
 			write_live_output();
@@ -127,14 +131,30 @@
 	}
 
 	async function update_config_wrapper(identifier?: string) {
+		const player_one_offset =
+			possible_name_offsets[player_one_index]?.[name_indicies[player_one_index] ?? 0]?.offset;
+		const player_two_offset =
+			possible_name_offsets[player_two_index]?.[name_indicies[player_two_index] ?? 0]?.offset;
+		const guild_offset =
+			possible_name_offsets[guild_index]?.[name_indicies[guild_index] ?? 0]?.offset;
+		const kill_offset = possible_kill_offsets[kill_index] ?? config?.kill ?? 0;
+
+		if (
+			player_one_offset === undefined ||
+			player_two_offset === undefined ||
+			guild_offset === undefined
+		) {
+			return;
+		}
+
 		config = {
 			...config,
 			patch: get_date(),
 			identifier: identifier || config.identifier,
-			player_one: possible_name_offsets[player_one_index][name_indicies[player_one_index]].offset,
-			player_two: possible_name_offsets[player_two_index][name_indicies[player_two_index]].offset,
-			guild: possible_name_offsets[guild_index][name_indicies[guild_index]].offset,
-			kill: possible_kill_offsets[kill_index]
+			player_one: player_one_offset,
+			player_two: player_two_offset,
+			guild: guild_offset,
+			kill: kill_offset
 		};
 		await update_config(config);
 		await write_live_output();
@@ -144,7 +164,8 @@
 		const names = possible_name_offsets
 			/* .filter((_, index) => index !== i) */
 			.map((list, index) => {
-				const selected = name_indicies[index];
+				const selected = name_indicies[index] ?? 0;
+				if (!list[selected]) return '';
 				return hexToString(log.hex.slice(list[selected].offset, list[selected].offset + 64))
 					.replaceAll('\0', '')
 					.replaceAll(' ', '');
@@ -154,7 +175,8 @@
 
 	$: get_name = (i: number, log: LogType) => {
 		const list = possible_name_offsets[i];
-		const selected = name_indicies[i];
+		const selected = name_indicies[i] ?? 0;
+		if (!list?.[selected]) return '';
 		return hexToString(log.hex.slice(list[selected].offset, list[selected].offset + 64))
 			.replaceAll('\0', '')
 			.replaceAll(' ', '');
@@ -237,9 +259,9 @@
 			const player_two_name = get_name(player_two_index, log);
 			const guild_name = get_name(guild_index, log);
 			if (config.include_characters) {
-				const remaining_indicies = [0, 1, 2, 3, 4].filter(
-					(i) => i !== player_one_index && i !== player_two_index && i !== guild_index
-				);
+				const remaining_indicies = log.names
+					.map((_, index) => index)
+					.filter((i) => i !== player_one_index && i !== player_two_index && i !== guild_index);
 				const remaining_names = remaining_indicies.map((i) => get_name(i, log));
 				characters = ` (${remaining_names.join(',')})`;
 			}
@@ -284,7 +306,7 @@
 	$: disabled = logs.length === 0 || loading;
 
 	$: own_guild_member_count = logs.reduce((players, log) => {
-		const name = log.names[player_one_index].name;
+		const name = get_name(player_one_index, log);
 		if (!players.includes(name)) {
 			players.push(name);
 		}
@@ -292,7 +314,7 @@
 	}, [] as string[]).length;
 
 	$: enemy_count = logs.reduce((players, log) => {
-		const name = log.names[player_two_index].name;
+		const name = get_name(player_two_index, log);
 		if (!players.includes(name)) {
 			players.push(name);
 		}
@@ -409,52 +431,57 @@
 		</button>
 	</div>
 	<div class="w-full flex gap-2 pb-14" style="height: {height}px;">
-		<div class="w-[550px] flex-shrink-0 rounded-lg border border-gray-700 overflow-hidden p-2 relative h-full">
-		{#if loading && logs.length === 0}
-			<div class="absolute inset-0 flex justify-center items-center mb-14">
-				<LoadingIndicator />
-			</div>
-		{:else if logs.length === 0 && !loading}
-			<div class="absolute inset-0 flex items-center justify-center">
-				<p class="text-gray-400">Waiting for logs...</p>
-			</div>
-		{/if}
-		{#key logs.length === 0}
-			<VirtualList items={logs} let:item={log}>
-				<div class="flex gap-2 group py-1 items-center px-1">
-					<p class="text-sm text-gray-400">{log.time}</p>
-					<!-- <p>{log.names[player_one_index].name}</p> -->
-					<Select
-						options={get_name_options(player_one_index, log)}
-						selected_value={player_one_index}
-						on_change={(e) => update_names('player_one', e)}
-					/>
-					<div class="flex justify-center items-center w-16">
-						{#if log.hex[possible_kill_offsets[kill_index]] === '1'}
-							<p class="self-center text-submarine-500">killed</p>
-						{:else}
-							<p class="self-center text-red-500">died to</p>
-						{/if}
-					</div>
-					<Select
-						options={get_name_options(player_two_index, log)}
-						selected_value={player_two_index}
-						on_change={(e) => update_names('player_two', e)}
-					/>
-					<p class="text-sm text-gray-400">from</p>
-					<Select
-						options={get_name_options(guild_index, log)}
-						selected_value={guild_index}
-						on_change={(e) => update_names('guild', e)}
-					/>
-					<!-- <div class="ml-auto hidden group-hover:flex items-center">
+		<div
+			class="w-[550px] flex-shrink-0 rounded-lg border border-gray-700 overflow-hidden p-2 relative h-full"
+		>
+			{#if loading && logs.length === 0}
+				<div class="absolute inset-0 flex justify-center items-center mb-14">
+					<LoadingIndicator />
+				</div>
+			{:else if logs.length === 0 && !loading}
+				<div
+					class="absolute inset-0 flex flex-col gap-1 items-center justify-center px-6 text-center"
+				>
+					<p class="text-gray-400">Waiting for logs...</p>
+					<p class="text-xs text-gray-500 line-clamp-2" title={status_message}>{status_message}</p>
+				</div>
+			{/if}
+			{#key logs.length === 0}
+				<VirtualList items={logs} let:item={log}>
+					<div class="flex gap-2 group py-1 items-center px-1">
+						<p class="text-sm text-gray-400">{log.time}</p>
+						<!-- <p>{log.names[player_one_index].name}</p> -->
+						<Select
+							options={get_name_options(player_one_index, log)}
+							selected_value={player_one_index}
+							on_change={(e) => update_names('player_one', e)}
+						/>
+						<div class="flex justify-center items-center w-16">
+							{#if log.hex[possible_kill_offsets[kill_index]] === '1'}
+								<p class="self-center text-submarine-500">killed</p>
+							{:else}
+								<p class="self-center text-red-500">died to</p>
+							{/if}
+						</div>
+						<Select
+							options={get_name_options(player_two_index, log)}
+							selected_value={player_two_index}
+							on_change={(e) => update_names('player_two', e)}
+						/>
+						<p class="text-sm text-gray-400">from</p>
+						<Select
+							options={get_name_options(guild_index, log)}
+							selected_value={guild_index}
+							on_change={(e) => update_names('guild', e)}
+						/>
+						<!-- <div class="ml-auto hidden group-hover:flex items-center">
 						<button on:click={() => null}>
 							<Icon icon={MdDelete} class="self-center text-red-500" />
 						</button>
 					</div> -->
-				</div>
-			</VirtualList>
-		{/key}
+					</div>
+				</VirtualList>
+			{/key}
 		</div>
 		<!-- Stats panel fills the remaining right space -->
 		<div class="flex-1 flex flex-col gap-2 text-xs h-full overflow-y-auto">
@@ -485,9 +512,15 @@
 						<span class="text-gray-500 mx-1">·</span>
 						<span class="text-red-500">D {alliance_overview.own.deaths}</span>
 						<span class="text-gray-500 mx-1">·</span>
-						<span class="font-semibold">{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span>
+						<span class="font-semibold"
+							>{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span
+						>
 					</p>
-					<p class="text-gray-400 mt-0.5">Enemy K/D: <span class="font-semibold text-foreground-secondary">{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span></p>
+					<p class="text-gray-400 mt-0.5">
+						Enemy K/D: <span class="font-semibold text-foreground-secondary"
+							>{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span
+						>
+					</p>
 				{/if}
 			</div>
 			<div class="rounded-lg border border-gray-700 p-2.5">
@@ -506,7 +539,9 @@
 						<span class="text-gray-500 mx-1">·</span>
 						<span class="text-red-500">D {personal_stats.deaths}</span>
 						<span class="text-gray-500 mx-1">·</span>
-						<span class="font-semibold">{calculate_kd(personal_stats.kills, personal_stats.deaths)}</span>
+						<span class="font-semibold"
+							>{calculate_kd(personal_stats.kills, personal_stats.deaths)}</span
+						>
 					</p>
 				{/if}
 			</div>
@@ -518,10 +553,12 @@
 					<div class="mb-3">
 						<div class="flex justify-between mb-1">
 							<span class="text-gray-400">Your Alliance</span>
-							<span class="font-semibold">{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span>
+							<span class="font-semibold"
+								>{calculate_kd(alliance_overview.own.kills, alliance_overview.own.deaths)}</span
+							>
 						</div>
 						<div class="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-							<div class="h-full bg-submarine-500 transition-all" style="width: {ownKillPct}%"></div>
+							<div class="h-full bg-submarine-500 transition-all" style="width: {ownKillPct}%" />
 						</div>
 						<div class="flex justify-between mt-1">
 							<span class="text-submarine-500">K {alliance_overview.own.kills}</span>
@@ -531,10 +568,12 @@
 					<div>
 						<div class="flex justify-between mb-1">
 							<span class="text-gray-400">Enemy</span>
-							<span class="font-semibold">{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span>
+							<span class="font-semibold"
+								>{calculate_kd(alliance_overview.enemy.kills, alliance_overview.enemy.deaths)}</span
+							>
 						</div>
 						<div class="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-							<div class="h-full bg-red-500 transition-all" style="width: {enemyKillPct}%"></div>
+							<div class="h-full bg-red-500 transition-all" style="width: {enemyKillPct}%" />
 						</div>
 						<div class="flex justify-between mt-1">
 							<span class="text-submarine-500">K {alliance_overview.enemy.kills}</span>

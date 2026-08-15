@@ -1,8 +1,19 @@
-from .. import parser
-from scapy.all import sniff
+from scapy.all import get_if_list, sniff, wrpcap
+
+from ..network import build_capture_filter, describe_endpoints, discover_game_endpoints
 
 
-def record(output):
+def record(output, all_interfaces=True):
+    endpoints = discover_game_endpoints()
+    capture_filter = build_capture_filter(endpoints)
+    interfaces = get_if_list() if all_interfaces else None
+
     print("Recording Network...", flush=True)
-    sniff(filter="tcp", prn=lambda x: parser.package_handler(
-        x, output, True), store=0)
+    print("Black Desert endpoints: " + describe_endpoints(endpoints), flush=True)
+    print("Capture filter: " + capture_filter, flush=True)
+    sniff(
+        filter=capture_filter,
+        iface=interfaces or None,
+        prn=lambda package: wrpcap(output + ".pcap", package, append=True),
+        store=0,
+    )

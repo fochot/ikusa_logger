@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { click_outside } from '../../logic/util';
+	import { click_outside } from '../util';
 	import Input from './input.svelte';
 
 	interface $$Props {
@@ -88,7 +88,7 @@
 	});
 </script>
 
-<div use:click_outside on:click_outside={() => (show_suggestions = false)}>
+<div use:click_outside={() => (show_suggestions = false)}>
 	<Input
 		id={$$props.id}
 		class={$$props.input_class}
@@ -108,7 +108,7 @@
 	>
 		{#each suggestions as suggestion}
 			<button
-				class="p-2 w-full text-left text-gold-muted  hover:text-gold outline-none focus:bg-gold focus:text-black"
+				class="p-2 w-full text-left text-gold-muted hover:text-gold outline-none focus:bg-gold focus:text-black"
 				bind:this={suggestion.button}
 				on:click={() => (value = suggestion.name)}>{suggestion.name}</button
 			>

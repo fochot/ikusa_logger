@@ -1,212 +1,191 @@
+from __future__ import annotations
+
 import os
-import re
 import sys
+from time import localtime, strftime
 
 if sys.platform != "win32":
     import types
+
     sys.modules.setdefault("scapy.arch.windows", types.ModuleType("scapy.arch.windows"))
 
-from scapy.all import sniff, rdpcap, get_if_list
-from time import localtime, strftime
+from scapy.all import get_if_list, rdpcap, sniff
+
+from ..network import (
+    GameEndpoint,
+    build_capture_filter,
+    describe_endpoints,
+    discover_game_endpoints,
+    packet_matches_endpoints,
+)
+from ..protocol import StreamScanner
 
 
-def dec(bytes):
-    message = str(bytes, "latin-1")
-    message = message.replace("\x00", "")
-    return message
+_scanner = StreamScanner()
+_game_endpoints: list[GameEndpoint] = []
+_last_timestamp = ""
 
 
-def extract_string(hex, offset, length):
-    # check whether the string begins with a 0x00, if so, return -1
-    if hex[offset: offset + 2] == "00":
-        return -1
-
-    # check whether the characters are always spaced by 1 byte (0x00), if not, return -1
-    test_offset = offset + 2
-    actual_length = length
-    while test_offset < offset + length - 2:
-        byte = hex[test_offset: test_offset + 2]
-        previous_byte = hex[test_offset - 2: test_offset]
-
-        if previous_byte == "00":
-            actual_length = test_offset - offset
-            break
-        if byte != "00":
-            return -1
-        test_offset += 4
-
-    try:
-        actual_length = min(len(hex) - offset, actual_length)
-        if length < 0:
-            raise ValueError("Package too short")
-
-        return dec(bytes.fromhex(hex[offset: offset + actual_length]))
-    except ValueError as e:
-        # print(e, flush=True)
-        return -1
+def _reset_scanner(endpoints: list[GameEndpoint] | None = None) -> None:
+    global _scanner, _game_endpoints, _last_timestamp
+    _scanner = StreamScanner()
+    _game_endpoints = endpoints or []
+    _last_timestamp = ""
 
 
-last_payload = ""
-current_position = 0
+def _ip_addresses(package) -> tuple[str, str] | None:
+    if "IP" in package:
+        return str(package["IP"].src), str(package["IP"].dst)
+    if "IPv6" in package:
+        return str(package["IPv6"].src), str(package["IPv6"].dst)
+    return None
 
-identifier_regex = r"[56][0-9a-f]0100[0-9a-f]{4}"
-name_regex = r"^[A-Z][a-zA-Z0-9_]{2,15}$"
+
+def _transport(package):
+    if "TCP" in package:
+        return "tcp", package["TCP"]
+    if "UDP" in package:
+        return "udp", package["UDP"]
+    return None
 
 
-def package_handler(package, output, ip_filter=True):
-    global last_payload
-
-    if "IP" not in package:
+def package_handler(package, output="", ip_filter=False):
+    global _last_timestamp
+    addresses = _ip_addresses(package)
+    transport = _transport(package)
+    if addresses is None or transport is None:
         return
 
-    package_src = package["IP"].src
+    source_ip, destination_ip = addresses
+    protocol, layer = transport
+    source_port = int(layer.sport)
+    destination_port = int(layer.dport)
 
-    # checks if the package derives from bdo
-    is_bdo_ip = (not ip_filter) or (
-        len(
-            (
-                [
-                    ip
-                    for ip in ["20.76.13", "20.76.14", "13.64.17", "13.93.181"]
-                    if ip in package_src
-                ]
-            )
-        )
-        > 0
+    if ip_filter and not packet_matches_endpoints(
+        source_ip,
+        destination_ip,
+        source_port,
+        destination_port,
+        _game_endpoints,
+    ):
+        return
+
+    payload = bytes(layer.payload)
+    if not payload:
+        return
+
+    # Direction is part of the key so server and client streams never share a
+    # reassembly buffer. This fixes the old global last_payload corruption.
+    flow = (
+        protocol,
+        source_ip,
+        source_port,
+        destination_ip,
+        destination_port,
     )
+    timestamp = strftime("%I:%M:%S", localtime(int(float(package.time))))
+    _last_timestamp = timestamp
 
-    # checkes if the packages comes from a tcp stream
-    uses_tcp = "TCP" in package and hasattr(package["TCP"].payload, "load")
-    if is_bdo_ip and uses_tcp:
-        # loads the payload as raw hex
-        payload = bytes(package["TCP"].payload).hex()
-
-        # iterate through the payload and try to find the identifier + player names + guild name + kill
-        payload = last_payload + payload
-        position = 0
-        while len(payload[position:]) >= 600:
-            payload = payload[position:]
-            position = 0
-            match_location = 0
-            matches = list(re.finditer(identifier_regex, payload))
-
-            if len(matches) == 0:
-                return  # no match found, return - could cause issue if the identifier is split between two packages
-            elif len(matches) == 1:
-                match_location = matches[0].start()
-            else:
-                while len(matches) > 1:
-                    if matches[0].start() + 600 < matches[1].start():
-                        match_location = matches[0].start()
-                        break
-                    elif len(matches) > 2:
-                        matches.pop(0)
-                    else:
-                        match_location = matches[1].start()
-                        break
-
-            payload = payload[match_location:]
-
-            if len(payload) >= 600:
-                possible_log = payload[0:600]
-                i = 0
-                names = []
-                while i < 600:
-                    name = extract_string(possible_log, i, 64)
-                    if name == -1:
-                        i += 1
-                        continue
-                    is_valid = re.match(name_regex, name)
-                    if is_valid:
-                        names.append(name + " " + str(i))
-                        i += 64
-                    else:
-                        i += 1
-                if len(names) == 5:
-                    time = strftime("%I:%M:%S", localtime(int(package.time)))
-                    print(
-                        payload[0:10]
-                        + ","
-                        + time
-                        + ","
-                        + ",".join(names)
-                        + ","
-                        + possible_log,
-                        flush=True,
-                    )
-                    position = 600
-                else:
-                    position = 1
-
-            else:
-                break
-
-        last_payload = payload[position:]
+    for candidate in _scanner.feed(flow, payload):
+        print(candidate.to_event(timestamp), flush=True)
 
 
-def open_pcap(file, output, ip_filter=True):
-    if file != None and not os.path.isfile(file):
+def _flush_scanner() -> None:
+    timestamp = _last_timestamp or strftime("%I:%M:%S", localtime())
+    for candidate in _scanner.flush():
+        print(candidate.to_event(timestamp), flush=True)
+
+
+def open_pcap(file, output, ip_filter=False):
+    if file is None or not os.path.isfile(file):
         print("Invalid file", flush=True)
         return
+
+    _reset_scanner()
     print("Reading " + file, flush=True)
+    print("Capture mode: offline TCP and UDP protocol discovery", flush=True)
+
     if os.name == "nt":
         print("Loading file into ram. This may take a while.", flush=True)
-        cap = rdpcap(file)
-        index = 0
-        for package in cap:
+        capture = rdpcap(file)
+        for index, package in enumerate(capture):
             package_handler(package, output, ip_filter)
             if index % 10000 == 0:
-                print(f"{index}/{len(cap)} packages analyzed.", flush=True)
-            index += 1
+                print(f"{index}/{len(capture)} packages analyzed.", flush=True)
     else:
-        sniff(offline=file, filter="tcp", prn=package_handler, store=0)
+        sniff(
+            offline=file,
+            filter="tcp or udp",
+            prn=lambda package: package_handler(package, output, ip_filter),
+            store=0,
+        )
 
-    print(f"Logs saved under: {
-          output}\nYou can close this window now.", flush=True)
+    _flush_scanner()
+    print("Network analysis complete. You can close this window now.", flush=True)
 
 
 def read_network_interfaces():
     if sys.platform == "win32":
-        # Import Windows-specific function
         from scapy.arch.windows import get_windows_if_list
-        winList = get_windows_if_list()
-        return {e["guid"]: e["name"] for e in winList}
 
-    else:
-        # Use Linux-specific function
-        return {iface: iface for iface in get_if_list()}
+        windows_interfaces = get_windows_if_list()
+        return {entry["guid"]: entry["name"] for entry in windows_interfaces}
+
+    return {interface: interface for interface in get_if_list()}
 
 
-def _sniff_with_fallback(output, ip_filter, primary_iface, label):
-    sniff_kwargs = {
-        "filter": "tcp",
-        "prn": lambda x: package_handler(x, output, ip_filter),
+def _sniff_with_fallback(
+    output,
+    ip_filter,
+    capture_filter,
+    primary_interface,
+    label,
+):
+    sniff_options = {
+        "filter": capture_filter,
+        "prn": lambda package: package_handler(package, output, ip_filter),
         "store": 0,
     }
     try:
-        sniff(**sniff_kwargs, iface=primary_iface)
-    except Exception as e:
-        print(f"{label} capture failed, falling back to default interface.", flush=True)
-        print(e, flush=True)
+        sniff(**sniff_options, iface=primary_interface)
+    except Exception as error:
+        print(f"{label} capture failed, falling back to the default interface.", flush=True)
+        print(error, flush=True)
         try:
-            sniff(**sniff_kwargs, iface=None)
+            sniff(**sniff_options, iface=None)
         except Exception as fallback_error:
             print("Error while reading network.", flush=True)
             print(fallback_error, flush=True)
 
 
-def start_sniff(output, all_interfaces=True, ip_filter=True):
+def start_sniff(output, all_interfaces=True, ip_filter=False):
+    endpoints = discover_game_endpoints()
+    _reset_scanner(endpoints)
+    capture_filter = build_capture_filter(endpoints)
+
     print("Reading Network...", flush=True)
+    print("Black Desert endpoints: " + describe_endpoints(endpoints), flush=True)
+    print("Capture filter: " + capture_filter, flush=True)
 
     if all_interfaces:
-        # Standard: use scapy's own interface names directly
         interfaces = get_if_list()
         print("Network Interfaces: " + ", ".join(interfaces), flush=True)
         target = interfaces if interfaces else None
-        _sniff_with_fallback(output, ip_filter, target, "Standard")
+        _sniff_with_fallback(
+            output,
+            ip_filter,
+            capture_filter,
+            target,
+            "Standard",
+        )
     else:
-        # Compatibility: legacy GUID->name mapping (Windows)
-        guidToNameDict = read_network_interfaces()
-        names = list(filter(None, [guidToNameDict.get(e) for e in get_if_list()]))
+        guid_to_name = read_network_interfaces()
+        names = list(filter(None, [guid_to_name.get(entry) for entry in get_if_list()]))
         target = names if names else None
-        _sniff_with_fallback(output, ip_filter, target, "Compatibility")
+        _sniff_with_fallback(
+            output,
+            ip_filter,
+            capture_filter,
+            target,
+            "Compatibility",
+        )

@@ -3,38 +3,24 @@
 	import { onDestroy, onMount } from 'svelte';
 	import Logger from '../../components/create-config/logger.svelte';
 	import { get_config, type Config, type LogType } from '../../components/create-config/config';
+	import { is_same_candidate, parse_logger_candidate } from '../../logic/logger-event';
 
 	let logs: LogType[] = [];
 	let is_destroyed = false;
 	let retry_count = 0;
 	let config: Config;
+	let capture_status = 'Starting Black Desert connection detection...';
 
 	const logger_callback: LoggerCallback = (data, status) => {
 		if (status === 'running') {
-			const d = data.split(',');
-			if (d.length === 8 && !data.includes('Network Interfaces:')) {
-				const new_log = {
-					identifier: d[0],
-					time: d[1],
-					names: d.slice(2, 7).map((name) => {
-						const split = name.split(' ');
-						return { name: split[0], offset: +split[1] };
-					}),
-					hex: d[7]
-				};
-
-				if (
-					logs.find(
-						(log) =>
-							log.identifier === new_log.identifier &&
-							log.time === new_log.time &&
-							log.names.length === new_log.names.length &&
-							log.names.every((name, i) => name.name === new_log.names[i].name)
-					)
-				) {
-					return;
-				}
-
+			if (data.startsWith('Black Desert endpoints:')) {
+				capture_status = data.includes('no Black Desert process endpoints found')
+					? 'Game process was not detected; scanning all TCP and UDP traffic.'
+					: data;
+			}
+			const new_log = parse_logger_candidate(data);
+			if (new_log) {
+				if (logs.some((log) => is_same_candidate(log, new_log))) return;
 				logs.push(new_log);
 				logs = logs;
 			} else if (data.includes('Error while reading network.')) {
@@ -90,4 +76,4 @@
 	});
 </script>
 
-<Logger {logs} height={375} />
+<Logger {logs} height={375} status_message={capture_status} />
