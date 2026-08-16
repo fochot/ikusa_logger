@@ -14,7 +14,6 @@
 		get_date,
 		get_formatted_date,
 		get_config,
-		hexToString,
 		calculate_kd,
 		PERSONAL_FAMILY_NAME_KEY
 	} from '../../components/create-config/config';
@@ -25,6 +24,7 @@
 	import Select from './select.svelte';
 	import { dev } from '$app/environment';
 	import GuildInfos from './guild-infos.svelte';
+	import { candidate_name_at_index } from '../../logic/logger-event';
 
 	export let logs: LogType[];
 	export let height = 155;
@@ -160,26 +160,12 @@
 		await write_live_output();
 	}
 
-	$: get_name_options = (i: number, log: LogType) => {
-		const names = possible_name_offsets
-			/* .filter((_, index) => index !== i) */
-			.map((list, index) => {
-				const selected = name_indicies[index] ?? 0;
-				if (!list[selected]) return '';
-				return hexToString(log.hex.slice(list[selected].offset, list[selected].offset + 64))
-					.replaceAll('\0', '')
-					.replaceAll(' ', '');
-			});
-		return names;
+	$: get_name_options = (_i: number, log: LogType) => {
+		return log.names.map((_, index) => candidate_name_at_index(log, index));
 	};
 
 	$: get_name = (i: number, log: LogType) => {
-		const list = possible_name_offsets[i];
-		const selected = name_indicies[i] ?? 0;
-		if (!list?.[selected]) return '';
-		return hexToString(log.hex.slice(list[selected].offset, list[selected].offset + 64))
-			.replaceAll('\0', '')
-			.replaceAll(' ', '');
+		return candidate_name_at_index(log, i);
 	};
 
 	function find_kill_offset(logs: LogType[]) {

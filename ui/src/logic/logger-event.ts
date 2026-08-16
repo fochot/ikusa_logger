@@ -1,6 +1,7 @@
 import type { LogType } from '../components/create-config/config';
 
 const EVENT_PREFIX = 'IKUSA_EVENT ';
+const VALID_NAME_PATTERN = /^[A-Z][A-Za-z0-9_]{2,15}$/;
 
 type CandidateEvent = {
 	type: 'candidate';
@@ -19,10 +20,11 @@ function is_candidate_event(value: unknown): value is CandidateEvent {
 		typeof event.identifier === 'string' &&
 		typeof event.time === 'string' &&
 		Array.isArray(event.names) &&
-		event.names.length >= 3 &&
+		event.names.length === 5 &&
 		event.names.every(
 			(name) =>
 				typeof name?.name === 'string' &&
+				VALID_NAME_PATTERN.test(name.name) &&
 				typeof name?.offset === 'number' &&
 				Number.isFinite(name.offset)
 		) &&
@@ -69,4 +71,9 @@ export function is_same_candidate(left: LogType, right: LogType) {
 		left.names.length === right.names.length &&
 		left.names.every((name, index) => name.name === right.names[index].name)
 	);
+}
+
+/** Return only the field that the protocol parser validated for this record. */
+export function candidate_name_at_index(log: LogType, index: number) {
+	return log.names[index]?.name ?? '';
 }
