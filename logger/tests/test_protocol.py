@@ -41,6 +41,69 @@ class ProtocolScannerTests(unittest.TestCase):
         self.assertEqual([name.name for name in records[0].names], list(self.names))
         self.assertEqual(scanner.feed("server-flow", b"noise"), [])
 
+    def test_ignores_tcp_retransmissions_and_overlapping_bytes(self):
+        payload = make_record(self.names)
+        scanner = StreamScanner()
+
+        self.assertEqual(scanner.feed("server-flow", payload[:190], sequence=1000), [])
+        records = scanner.feed("server-flow", payload[190:], sequence=1190)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(scanner.feed("server-flow", payload[150:], sequence=1150), [])
+        self.assertEqual(scanner.feed("server-flow", payload, sequence=1000), [])
+
+    def test_keeps_legitimate_identical_records_at_new_sequence_numbers(self):
+        payload = make_record(self.names)
+        scanner = StreamScanner()
+
+        first = scanner.feed("server-flow", payload, sequence=1000)
+        second = scanner.feed("server-flow", payload, sequence=1300)
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+
+    def test_consumes_a_record_but_keeps_the_next_partial_record(self):
+        first_payload = make_record(self.names)
+        second_names = ("Guild", "FamilyNew", "CharNew", "EnemyNew", "EnemyChar")
+        second_payload = make_record(second_names)
+        scanner = StreamScanner()
+
+        first = scanner.feed("server-flow", first_payload + second_payload[:150])
+        second = scanner.feed("server-flow", second_payload[150:])
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertEqual(
+            [name.name for name in second[0].names],
+            list(second_names),
+        )
+
+    def test_handles_tcp_sequence_number_wraparound(self):
+        payload = make_record(self.names)
+        scanner = StreamScanner()
+        start = (1 << 32) - 150
+
+        self.assertEqual(scanner.feed("server-flow", payload[:150], sequence=start), [])
+        records = scanner.feed("server-flow", payload[150:], sequence=0)
+
+        self.assertEqual(len(records), 1)
+
+    def test_does_not_join_payload_across_a_tcp_gap(self):
+        payload = make_record(self.names)
+        scanner = StreamScanner()
+
+        self.assertEqual(scanner.feed("server-flow", payload[:150], sequence=1000), [])
+        self.assertEqual(scanner.feed("server-flow", payload[150:], sequence=1200), [])
+
+    def test_reset_flow_accepts_a_reused_tcp_tuple(self):
+        payload = make_record(self.names)
+        scanner = StreamScanner()
+
+        self.assertEqual(len(scanner.feed("server-flow", payload, sequence=1000)), 1)
+        scanner.reset_flow("server-flow")
+
+        self.assertEqual(len(scanner.feed("server-flow", payload, sequence=25)), 1)
+
     def test_accepts_changed_header_with_original_record_shape(self):
         payload = make_record(self.names, header=bytes.fromhex("990203aabb"))
 
@@ -54,6 +117,14 @@ class ProtocolScannerTests(unittest.TestCase):
             self.names,
             header=bytes.fromhex("990203aabb"),
             offsets=(6, 30, 55, 80, 105),
+        )
+
+        self.assertEqual(extract_candidate_records(payload), [])
+
+    def test_rejects_header_match_without_an_early_first_name(self):
+        payload = make_record(
+            self.names,
+            offsets=(60, 105, 160, 215, 270),
         )
 
         self.assertEqual(extract_candidate_records(payload), [])

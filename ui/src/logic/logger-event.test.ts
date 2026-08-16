@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { candidate_name_at_index, is_same_candidate, parse_logger_candidate } from './logger-event';
+import {
+	candidate_name_at_index,
+	candidate_nibble_at_relative_offset,
+	is_same_candidate,
+	parse_logger_candidate
+} from './logger-event';
 
 describe('logger event parsing', () => {
 	it('parses a structured candidate with exactly five validated names', () => {
@@ -83,6 +88,26 @@ describe('logger event parsing', () => {
 
 		expect(candidate_name_at_index(candidate, 0)).toBe('Conquest');
 		expect(candidate_name_at_index(candidate, 5)).toBe('');
+	});
+
+	it('moves the kill bit with a shifted combat-record layout', () => {
+		const hex = Array.from({ length: 160 }, () => '0');
+		hex[131] = '1';
+		const candidate = {
+			identifier: '720100fe1a',
+			time: '12:34:56',
+			names: [
+				{ name: 'Conquest', offset: 6 },
+				{ name: 'FamilyOne', offset: 400 },
+				{ name: 'CharOne', offset: 456 },
+				{ name: 'FamilyTwo', offset: 524 },
+				{ name: 'CharTwo', offset: 566 }
+			],
+			hex: hex.join('')
+		};
+
+		expect(candidate.hex[135]).toBe('0');
+		expect(candidate_nibble_at_relative_offset(candidate, 135, 0, 10)).toBe('1');
 	});
 
 	it('rejects structured events containing a corrupted name', () => {

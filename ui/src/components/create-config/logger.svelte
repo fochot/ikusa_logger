@@ -24,7 +24,10 @@
 	import Select from './select.svelte';
 	import { dev } from '$app/environment';
 	import GuildInfos from './guild-infos.svelte';
-	import { candidate_name_at_index } from '../../logic/logger-event';
+	import {
+		candidate_name_at_index,
+		candidate_nibble_at_relative_offset
+	} from '../../logic/logger-event';
 
 	export let logs: LogType[];
 	export let height = 155;
@@ -168,6 +171,22 @@
 		return candidate_name_at_index(log, i);
 	};
 
+	$: is_kill = (log: LogType) => {
+		const kill_offset = possible_kill_offsets[kill_index];
+		const configured_anchor_offset =
+			possible_name_offsets[guild_index]?.[name_indicies[guild_index] ?? 0]?.offset;
+		if (kill_offset === undefined || configured_anchor_offset === undefined) return false;
+
+		return (
+			candidate_nibble_at_relative_offset(
+				log,
+				kill_offset,
+				guild_index,
+				configured_anchor_offset
+			) === '1'
+		);
+	};
+
 	function find_kill_offset(logs: LogType[]) {
 		const all_indicies: number[] = [];
 		for (const log of logs) {
@@ -252,7 +271,7 @@
 				characters = ` (${remaining_names.join(',')})`;
 			}
 
-			if (log.hex[possible_kill_offsets[kill_index]] === '1')
+			if (is_kill(log))
 				output += `[${log.time}] ${player_one_name} has killed ${player_two_name} from ${guild_name}${characters}\n`;
 			else
 				output += `[${log.time}] ${player_one_name} died to ${player_two_name} from ${guild_name}${characters}\n`;
@@ -309,8 +328,8 @@
 
 	$: alliance_overview = logs.reduce(
 		(acc, log) => {
-			const is_kill = log.hex[possible_kill_offsets[kill_index]] === '1';
-			if (is_kill) {
+			const log_is_kill = is_kill(log);
+			if (log_is_kill) {
 				acc.own.kills += 1;
 				acc.enemy.deaths += 1;
 			} else {
@@ -334,9 +353,9 @@
 		) {
 			return { killer: '', victim: '' };
 		}
-		const is_kill = log.hex[possible_kill_offsets[kill_index]] === '1';
-		const killer = is_kill ? get_name(player_one_index, log) : get_name(player_two_index, log);
-		const victim = is_kill ? get_name(player_two_index, log) : get_name(player_one_index, log);
+		const log_is_kill = is_kill(log);
+		const killer = log_is_kill ? get_name(player_one_index, log) : get_name(player_two_index, log);
+		const victim = log_is_kill ? get_name(player_two_index, log) : get_name(player_one_index, log);
 		return { killer, victim };
 	}
 
@@ -443,7 +462,7 @@
 							on_change={(e) => update_names('player_one', e)}
 						/>
 						<div class="flex justify-center items-center w-16">
-							{#if log.hex[possible_kill_offsets[kill_index]] === '1'}
+							{#if is_kill(log)}
 								<p class="self-center text-submarine-500">killed</p>
 							{:else}
 								<p class="self-center text-red-500">died to</p>
@@ -480,7 +499,7 @@
 							ModalManager.open(GuildInfos, {
 								logs: logs.map((l) => ({
 									names: l.names.map((n) => n.name),
-									kill: l.hex[possible_kill_offsets[kill_index]] === '1'
+									kill: is_kill(l)
 								})),
 								guild_index,
 								player_one_index,

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
-import hashlib
 import json
 import re
 from typing import Hashable
@@ -19,6 +17,9 @@ EXPECTED_NAMES = 5
 MAX_NAME_LENGTH = 16
 MAX_STREAM_BUFFER = RECORD_BYTES * 8
 MIN_NAME_SPAN = 120
+MAX_FIRST_NAME_OFFSET = 32
+TCP_SEQUENCE_MODULUS = 1 << 32
+TCP_SEQUENCE_HALF_RANGE = TCP_SEQUENCE_MODULUS >> 1
 _ALLOWED_NAME_BYTES = frozenset(
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
 )
@@ -110,7 +111,7 @@ def extract_candidate_records(payload: bytes, final: bool = False) -> list[Candi
 
         window = payload[start : start + RECORD_BYTES]
         names = extract_utf16le_names(window)
-        if len(names) != EXPECTED_NAMES:
+        if not _has_original_name_layout(names):
             continue
 
         candidates.append(
@@ -132,9 +133,7 @@ def extract_candidate_records(payload: bytes, final: bool = False) -> list[Candi
 
         window = payload[start : start + RECORD_BYTES]
         names = extract_utf16le_names(window)
-        if len(names) != EXPECTED_NAMES:
-            continue
-        if names[-1].offset - names[0].offset < MIN_NAME_SPAN:
+        if not _has_original_name_layout(names):
             continue
 
         candidates.append(
@@ -145,46 +144,107 @@ def extract_candidate_records(payload: bytes, final: bool = False) -> list[Candi
     return candidates
 
 
+def _has_original_name_layout(names: list[NameMatch]) -> bool:
+    return (
+        len(names) == EXPECTED_NAMES
+        and names[0].offset <= MAX_FIRST_NAME_OFFSET
+        and names[-1].offset - names[0].offset >= MIN_NAME_SPAN
+    )
+
+
 class StreamScanner:
     """Reassemble each incoming TCP flow without broad payload discovery."""
 
     def __init__(self) -> None:
         self._buffers: dict[Hashable, bytes] = {}
-        self._recent_fingerprints: deque[str] = deque(maxlen=4096)
-        self._fingerprint_set: set[str] = set()
+        self._next_sequences: dict[Hashable, int] = {}
 
-    def _remember(self, fingerprint: str) -> bool:
-        if fingerprint in self._fingerprint_set:
-            return False
+    def reset_flow(self, flow: Hashable) -> None:
+        """Forget stream state when a new TCP connection starts."""
 
-        if len(self._recent_fingerprints) == self._recent_fingerprints.maxlen:
-            oldest = self._recent_fingerprints.popleft()
-            self._fingerprint_set.discard(oldest)
+        self._buffers.pop(flow, None)
+        self._next_sequences.pop(flow, None)
 
-        self._recent_fingerprints.append(fingerprint)
-        self._fingerprint_set.add(fingerprint)
-        return True
+    def _unseen_payload(
+        self,
+        flow: Hashable,
+        payload: bytes,
+        sequence: int | None,
+    ) -> bytes:
+        if sequence is None:
+            return payload
 
-    def _deduplicate(self, candidates: list[CandidateRecord]) -> list[CandidateRecord]:
-        unique_candidates: list[CandidateRecord] = []
+        next_sequence = self._next_sequences.get(flow)
+        if next_sequence is None:
+            self._next_sequences[flow] = sequence + len(payload)
+            return payload
+
+        # Scapy exposes the 32-bit wire value. Unwrap it around our monotonic
+        # high-water mark so long-running connections survive a sequence wrap.
+        sequence_base = next_sequence - (next_sequence % TCP_SEQUENCE_MODULUS)
+        sequence = sequence_base + (sequence % TCP_SEQUENCE_MODULUS)
+        if sequence - next_sequence > TCP_SEQUENCE_HALF_RANGE:
+            sequence -= TCP_SEQUENCE_MODULUS
+        elif next_sequence - sequence > TCP_SEQUENCE_HALF_RANGE:
+            sequence += TCP_SEQUENCE_MODULUS
+
+        if sequence > next_sequence:
+            # Missing TCP bytes must never be bridged with unrelated payload.
+            # Begin a fresh scan at the first observed byte after the gap.
+            self._buffers.pop(flow, None)
+            self._next_sequences[flow] = sequence + len(payload)
+            return payload
+
+        overlap = next_sequence - sequence
+        if overlap >= len(payload):
+            return b""
+
+        unseen = payload[overlap:]
+        self._next_sequences[flow] = next_sequence + len(unseen)
+        return unseen
+
+    def _scan_buffer(self, flow: Hashable) -> list[CandidateRecord]:
+        buffer = self._buffers.get(flow, b"")
+        candidates = extract_candidate_records(buffer)
+        if not candidates:
+            return []
+
+        # A parsed record is complete. Remove it and everything before it so a
+        # later packet cannot turn the same bytes into a shifted second record.
+        consumed_until = 0
+        search_from = 0
         for candidate in candidates:
-            fingerprint = hashlib.sha1(candidate.payload).hexdigest()
-            if self._remember(fingerprint):
-                unique_candidates.append(candidate)
-        return unique_candidates
+            start = buffer.find(candidate.payload, search_from)
+            if start < 0:
+                continue
+            consumed_until = start + len(candidate.payload)
+            search_from = consumed_until
 
-    def feed(self, flow: Hashable, payload: bytes) -> list[CandidateRecord]:
+        if consumed_until:
+            self._buffers[flow] = buffer[consumed_until:]
+        return candidates
+
+    def feed(
+        self,
+        flow: Hashable,
+        payload: bytes,
+        sequence: int | None = None,
+    ) -> list[CandidateRecord]:
         if not payload:
             return []
 
-        buffer = self._buffers.get(flow, b"") + payload
+        unseen = self._unseen_payload(flow, payload, sequence)
+        if not unseen:
+            return []
+
+        buffer = self._buffers.get(flow, b"") + unseen
         if len(buffer) > MAX_STREAM_BUFFER:
             buffer = buffer[-MAX_STREAM_BUFFER:]
         self._buffers[flow] = buffer
-        return self._deduplicate(extract_candidate_records(buffer))
+        return self._scan_buffer(flow)
 
     def flush(self) -> list[CandidateRecord]:
         candidates: list[CandidateRecord] = []
-        for buffer in self._buffers.values():
-            candidates.extend(extract_candidate_records(buffer))
-        return self._deduplicate(candidates)
+        for flow in list(self._buffers):
+            candidates.extend(self._scan_buffer(flow))
+        return candidates

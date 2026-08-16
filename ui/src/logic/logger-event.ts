@@ -77,3 +77,17 @@ export function is_same_candidate(left: LogType, right: LogType) {
 export function candidate_name_at_index(log: LogType, index: number) {
 	return log.names[index]?.name ?? '';
 }
+
+/** Read a configured hex nibble after applying this record's layout shift. */
+export function candidate_nibble_at_relative_offset(
+	log: LogType,
+	configured_offset: number,
+	anchor_name_index: number,
+	configured_anchor_offset: number
+) {
+	const actual_anchor_offset = log.names[anchor_name_index]?.offset;
+	if (actual_anchor_offset === undefined) return '';
+
+	const offset = configured_offset + actual_anchor_offset - configured_anchor_offset;
+	return log.hex[offset] ?? '';
+}

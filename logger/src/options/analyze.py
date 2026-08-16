@@ -70,10 +70,6 @@ def package_handler(package, output="", ip_filter=False):
     ):
         return
 
-    payload = bytes(layer.payload)
-    if not payload:
-        return
-
     # Direction is part of the key so server and client streams never share a
     # reassembly buffer. This fixes the old global last_payload corruption.
     flow = (
@@ -83,10 +79,19 @@ def package_handler(package, output="", ip_filter=False):
         destination_ip,
         destination_port,
     )
+    syn = bool(int(layer.flags) & 0x02)
+    if syn:
+        _scanner.reset_flow(flow)
+
+    payload = bytes(layer.payload)
+    if not payload:
+        return
+
     timestamp = strftime("%I:%M:%S", localtime(int(float(package.time))))
     _last_timestamp = timestamp
 
-    for candidate in _scanner.feed(flow, payload):
+    payload_sequence = int(layer.seq) + int(syn)
+    for candidate in _scanner.feed(flow, payload, sequence=payload_sequence):
         print(candidate.to_event(timestamp), flush=True)
 
 
