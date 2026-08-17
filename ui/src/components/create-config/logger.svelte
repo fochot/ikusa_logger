@@ -3,7 +3,6 @@
 	import { open_save_location } from '../../logic/file';
 	import LoadingIndicator from '../../svelte-ui/elements/loading-indicator.svelte';
 	import IoMdSettings from 'svelte-icons/io/IoMdSettings.svelte';
-	import { find_all_indicies } from '../../svelte-ui/util';
 	import Button from '../../svelte-ui/elements/button.svelte';
 	import Checkbox from '../../svelte-ui/elements/checkbox.svelte';
 	import ConfigModal from './config.modal.svelte';
@@ -24,10 +23,7 @@
 	import Select from './select.svelte';
 	import { dev } from '$app/environment';
 	import GuildInfos from './guild-infos.svelte';
-	import {
-		candidate_name_at_index,
-		candidate_nibble_at_relative_offset
-	} from '../../logic/logger-event';
+	import { candidate_is_kill, candidate_name_at_index } from '../../logic/logger-event';
 
 	export let logs: LogType[];
 	export let height = 155;
@@ -80,10 +76,6 @@
 		auto_scroll && setTimeout(scroll);
 
 		if (logs.length < 50 || logs.length % 100 === 0) {
-			const detected_kill_offsets = find_kill_offset(logs);
-			if (detected_kill_offsets.length > 0) {
-				possible_kill_offsets = detected_kill_offsets;
-			}
 			calculate_config();
 		} else {
 			write_live_output();
@@ -172,49 +164,8 @@
 	};
 
 	$: is_kill = (log: LogType) => {
-		const kill_offset = possible_kill_offsets[kill_index];
-		const configured_anchor_offset =
-			possible_name_offsets[guild_index]?.[name_indicies[guild_index] ?? 0]?.offset;
-		if (kill_offset === undefined || configured_anchor_offset === undefined) return false;
-
-		return (
-			candidate_nibble_at_relative_offset(
-				log,
-				kill_offset,
-				guild_index,
-				configured_anchor_offset
-			) === '1'
-		);
+		return candidate_is_kill(log);
 	};
-
-	function find_kill_offset(logs: LogType[]) {
-		const all_indicies: number[] = [];
-		for (const log of logs) {
-			let indicies = find_all_indicies(log.hex, '01');
-			indicies = indicies.filter((index) =>
-				log.names.every((n) => index > n.offset + 64 || index < n.offset)
-			);
-			all_indicies.push(...indicies);
-		}
-		const possible_kill_offsets = new Map<number, number>();
-		for (const log of logs) {
-			for (const index of all_indicies) {
-				if (log.hex.slice(index, index + 2) === '00') {
-					if (possible_kill_offsets.has(index)) {
-						possible_kill_offsets.set(index, possible_kill_offsets.get(index)! + 1);
-					} else {
-						possible_kill_offsets.set(index, 1);
-					}
-				}
-			}
-		}
-		// creates array sorted by value
-		const sorted = Array.from(possible_kill_offsets.entries())
-			.sort((a, b) => b[1] - a[1])
-			.map((a) => a[0] + 1);
-
-		return sorted;
-	}
 
 	function update_names(target: 'player_one' | 'player_two' | 'guild', e: Event) {
 		if (target === 'player_one') {

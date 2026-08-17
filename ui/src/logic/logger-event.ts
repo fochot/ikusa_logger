@@ -2,11 +2,13 @@ import type { LogType } from '../components/create-config/config';
 
 const EVENT_PREFIX = 'IKUSA_EVENT ';
 const VALID_NAME_PATTERN = /^[A-Z][A-Za-z0-9_]{2,15}$/;
+const KILL_NIBBLE_AFTER_FIRST_NAME = 125;
 
 type CandidateEvent = {
 	type: 'candidate';
 	identifier: string;
 	time: string;
+	kill?: boolean;
 	names: { name: string; offset: number }[];
 	hex: string;
 	strategy?: string;
@@ -19,6 +21,7 @@ function is_candidate_event(value: unknown): value is CandidateEvent {
 		event.type === 'candidate' &&
 		typeof event.identifier === 'string' &&
 		typeof event.time === 'string' &&
+		(event.kill === undefined || typeof event.kill === 'boolean') &&
 		Array.isArray(event.names) &&
 		event.names.length === 5 &&
 		event.names.every(
@@ -40,6 +43,7 @@ export function parse_logger_candidate(data: string): LogType | null {
 			return {
 				identifier: event.identifier,
 				time: event.time,
+				kill: event.kill,
 				names: event.names,
 				hex: event.hex
 			};
@@ -78,16 +82,11 @@ export function candidate_name_at_index(log: LogType, index: number) {
 	return log.names[index]?.name ?? '';
 }
 
-/** Read a configured hex nibble after applying this record's layout shift. */
-export function candidate_nibble_at_relative_offset(
-	log: LogType,
-	configured_offset: number,
-	anchor_name_index: number,
-	configured_anchor_offset: number
-) {
-	const actual_anchor_offset = log.names[anchor_name_index]?.offset;
-	if (actual_anchor_offset === undefined) return '';
+/** Read direction from the stable combat byte, with old event compatibility. */
+export function candidate_is_kill(log: LogType) {
+	if (typeof log.kill === 'boolean') return log.kill;
 
-	const offset = configured_offset + actual_anchor_offset - configured_anchor_offset;
-	return log.hex[offset] ?? '';
+	const first_name_offset = log.names[0]?.offset;
+	if (first_name_offset === undefined) return false;
+	return log.hex[first_name_offset + KILL_NIBBLE_AFTER_FIRST_NAME] === '1';
 }

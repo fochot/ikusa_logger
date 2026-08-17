@@ -19,6 +19,7 @@ export type LogType = {
 	time: string;
 	names: { name: string; offset: number }[];
 	hex: string;
+	kill?: boolean;
 };
 
 export type Log = {

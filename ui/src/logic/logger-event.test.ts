@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	candidate_name_at_index,
-	candidate_nibble_at_relative_offset,
+	candidate_is_kill,
 	is_same_candidate,
 	parse_logger_candidate
 } from './logger-event';
@@ -13,6 +13,7 @@ describe('logger event parsing', () => {
 			type: 'candidate',
 			identifier: '630100af12',
 			time: '12:34:56',
+			kill: true,
 			names: [
 				{ name: 'Guild', offset: 12 },
 				{ name: 'FamilyOne', offset: 200 },
@@ -26,6 +27,7 @@ describe('logger event parsing', () => {
 		expect(parse_logger_candidate('IKUSA_EVENT ' + JSON.stringify(event))).toEqual({
 			identifier: event.identifier,
 			time: event.time,
+			kill: true,
 			names: event.names,
 			hex: event.hex
 		});
@@ -90,7 +92,7 @@ describe('logger event parsing', () => {
 		expect(candidate_name_at_index(candidate, 5)).toBe('');
 	});
 
-	it('moves the kill bit with a shifted combat-record layout', () => {
+	it('reads the original kill bit from a shifted combat-record layout', () => {
 		const hex = Array.from({ length: 160 }, () => '0');
 		hex[131] = '1';
 		const candidate = {
@@ -107,7 +109,19 @@ describe('logger event parsing', () => {
 		};
 
 		expect(candidate.hex[135]).toBe('0');
-		expect(candidate_nibble_at_relative_offset(candidate, 135, 0, 10)).toBe('1');
+		expect(candidate_is_kill(candidate)).toBe(true);
+	});
+
+	it('prefers the direction already validated by the protocol parser', () => {
+		const candidate = {
+			identifier: '720100fe1a',
+			time: '12:34:56',
+			kill: false,
+			names: [{ name: 'Comfy', offset: 10 }],
+			hex: `${'0'.repeat(135)}1`
+		};
+
+		expect(candidate_is_kill(candidate)).toBe(false);
 	});
 
 	it('rejects structured events containing a corrupted name', () => {
