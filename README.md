@@ -5,6 +5,14 @@ https://user-images.githubusercontent.com/42447473/184521641-e66a6bc4-191f-4c60-
 
 Visualize your captured logs with this [website](https://github.com/sch-28/ikusa).
 
+## Version 1.8.9
+
+Version 1.8.9 restores reliable Black Desert combat logging while keeping the
+original narrow packet format. It discovers the active world-server connection,
+reassembles combat records split across TCP packets (including VPN-induced
+segmentation), reads the original kill/death flag, and rejects unrelated traffic
+that only happens to contain player-like names.
+
 ## Prerequisites
 
 ### Windows
@@ -45,13 +53,15 @@ no longer require hard-coded address ranges. UDP, authentication, launcher, web,
 other game-process connections are not inspected.
 
 Captured TCP fragments are reassembled per connection, but a row is emitted only when
-it matches the original 300-byte combat record and exactly five valid, widely spaced
-name fields. The opcode byte and record header may change between BDO patches, so the
-parser can realign that same strict record shape without scanning arbitrary name groups.
+it matches the original `720100fe1a` header, the 300-byte combat record, and the exact
+five-field name layout. Kill/death direction is read from the original combat flag
+instead of being guessed from other bytes in the packet.
 
 For the best result, start Black Desert and enter a game channel before clicking
 `Record`. The developer console prints the detected endpoints and the active capture
-filter.
+filter. A VPN may move the connection to a virtual adapter or split records differently;
+the logger handles split TCP records, but disabling the VPN remains a useful diagnostic
+step if Npcap cannot see traffic on that adapter.
 
 If traffic is captured but no combat entries are found, create a short diagnostic PCAP
 while reproducing one kill/death event:
