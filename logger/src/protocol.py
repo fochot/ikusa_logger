@@ -8,17 +8,14 @@ from typing import Hashable
 
 EVENT_PREFIX = "IKUSA_EVENT "
 
-# The opcode byte can change in a BDO patch. The stable 0x01/0x00 portion is
-# preferred, while the exact five-name record shape remains authoritative.
-HEADER_PATTERN = re.compile(rb".\x01\x00..", re.DOTALL)
+COMBAT_HEADER = bytes.fromhex("720100fe1a")
 NAME_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]{2,15}$")
 RECORD_BYTES = 300
 EXPECTED_NAMES = 5
 MAX_NAME_LENGTH = 16
 MAX_STREAM_BUFFER = RECORD_BYTES * 8
-MAX_FIRST_NAME_OFFSET = 32
-EXPECTED_RELATIVE_NAME_OFFSETS = (0, 63, 132, 197, 259)
-KILL_BYTE_AFTER_FIRST_NAME = 62
+EXPECTED_NAME_OFFSETS = (5, 68, 137, 202, 264)
+KILL_BYTE_OFFSET = 67
 TCP_SEQUENCE_MODULUS = 1 << 32
 TCP_SEQUENCE_HALF_RANGE = TCP_SEQUENCE_MODULUS >> 1
 _ALLOWED_NAME_BYTES = frozenset(
@@ -98,75 +95,50 @@ def extract_utf16le_names(payload: bytes) -> list[NameMatch]:
 def extract_candidate_records(payload: bytes, final: bool = False) -> list[CandidateRecord]:
     """Return complete records matching the original combat-data shape.
 
-    A patch may change the leading opcode. In that case the fallback aligns a
-    window from the five name fields, but still requires their exact original
-    spacing and the original binary direction flag.
+    Records are aligned only from the original combat header. TCP reassembly
+    handles headers and records split across packets without widening the
+    scanner to unrelated five-name payloads.
     """
 
     del final  # Incomplete records were never emitted by the original parser.
     candidates: list[CandidateRecord] = []
     next_allowed_start = 0
 
-    for header in HEADER_PATTERN.finditer(payload):
-        start = header.start()
+    start = payload.find(COMBAT_HEADER)
+    while start >= 0:
         if start < next_allowed_start or len(payload) - start < RECORD_BYTES:
+            start = payload.find(COMBAT_HEADER, start + 1)
             continue
 
         window = payload[start : start + RECORD_BYTES]
         names = extract_utf16le_names(window)
         if not _has_original_combat_layout(window, names):
+            start = payload.find(COMBAT_HEADER, start + 1)
             continue
 
-        candidates.append(
-            _candidate_record(window, names)
-        )
+        candidates.append(_candidate_record(window, names))
         next_allowed_start = start + RECORD_BYTES
-
-    if candidates:
-        return candidates
-
-    # The stable header may also change. Keep this fallback limited to the
-    # original record length, exact field count, and exact field spacing.
-    all_names = extract_utf16le_names(payload)
-    next_allowed_start = 0
-    for first_name in all_names:
-        start = max(0, first_name.offset - 6)
-        if start < next_allowed_start or len(payload) - start < RECORD_BYTES:
-            continue
-
-        window = payload[start : start + RECORD_BYTES]
-        names = extract_utf16le_names(window)
-        if not _has_original_combat_layout(window, names):
-            continue
-
-        candidates.append(
-            _candidate_record(window, names)
-        )
-        next_allowed_start = start + RECORD_BYTES
+        start = payload.find(COMBAT_HEADER, start + RECORD_BYTES)
 
     return candidates
 
 
 def _has_original_combat_layout(payload: bytes, names: list[NameMatch]) -> bool:
-    if len(names) != EXPECTED_NAMES or names[0].offset > MAX_FIRST_NAME_OFFSET:
+    if len(names) != EXPECTED_NAMES:
         return False
 
-    first_offset = names[0].offset
-    relative_offsets = tuple(name.offset - first_offset for name in names)
-    if relative_offsets != EXPECTED_RELATIVE_NAME_OFFSETS:
+    if tuple(name.offset for name in names) != EXPECTED_NAME_OFFSETS:
         return False
 
-    kill_offset = first_offset + KILL_BYTE_AFTER_FIRST_NAME
-    return payload[kill_offset] in (0, 1)
+    return payload[KILL_BYTE_OFFSET] in (0, 1)
 
 
 def _candidate_record(payload: bytes, names: list[NameMatch]) -> CandidateRecord:
-    kill_offset = names[0].offset + KILL_BYTE_AFTER_FIRST_NAME
     return CandidateRecord(
         payload[:5].hex(),
         tuple(names),
         payload,
-        payload[kill_offset] == 1,
+        payload[KILL_BYTE_OFFSET] == 1,
     )
 
 

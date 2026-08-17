@@ -3,7 +3,7 @@ import unittest
 
 from src.protocol import (
     EVENT_PREFIX,
-    KILL_BYTE_AFTER_FIRST_NAME,
+    KILL_BYTE_OFFSET,
     StreamScanner,
     extract_candidate_records,
 )
@@ -11,13 +11,13 @@ from src.protocol import (
 
 def make_record(
     names,
-    header=bytes.fromhex("630100af12"),
+    header=bytes.fromhex("720100fe1a"),
     offsets=(5, 68, 137, 202, 264),
     kill=True,
 ):
     payload = bytearray(300)
     payload[:5] = header
-    payload[offsets[0] + KILL_BYTE_AFTER_FIRST_NAME] = int(kill)
+    payload[KILL_BYTE_OFFSET] = int(kill)
     for offset, name in zip(offsets, names):
         encoded = name.encode("utf-16le") + b"\0\0"
         payload[offset : offset + len(encoded)] = encoded
@@ -32,7 +32,7 @@ class ProtocolScannerTests(unittest.TestCase):
         records = extract_candidate_records(make_record(self.names))
 
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].identifier, "630100af12")
+        self.assertEqual(records[0].identifier, "720100fe1a")
         self.assertEqual([name.name for name in records[0].names], list(self.names))
         self.assertEqual([name.offset for name in records[0].names], [5, 68, 137, 202, 264])
         self.assertEqual(len(records[0].payload), 300)
@@ -48,6 +48,16 @@ class ProtocolScannerTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual([name.name for name in records[0].names], list(self.names))
         self.assertEqual(scanner.feed("server-flow", b"noise"), [])
+
+    def test_reassembles_a_combat_header_split_between_tcp_packets(self):
+        payload = make_record(self.names)
+        scanner = StreamScanner()
+
+        self.assertEqual(scanner.feed("server-flow", payload[:2], sequence=1000), [])
+        records = scanner.feed("server-flow", payload[2:], sequence=1002)
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].identifier, "720100fe1a")
 
     def test_ignores_tcp_retransmissions_and_overlapping_bytes(self):
         payload = make_record(self.names)
@@ -112,18 +122,14 @@ class ProtocolScannerTests(unittest.TestCase):
 
         self.assertEqual(len(scanner.feed("server-flow", payload, sequence=25)), 1)
 
-    def test_accepts_changed_header_with_original_record_shape(self):
+    def test_rejects_changed_header_even_with_five_names(self):
         payload = make_record(self.names, header=bytes.fromhex("990203aabb"))
 
-        records = extract_candidate_records(payload)
-
-        self.assertEqual(len(records), 1)
-        self.assertEqual([name.name for name in records[0].names], list(self.names))
+        self.assertEqual(extract_candidate_records(payload), [])
 
     def test_rejects_dense_general_name_groups(self):
         payload = make_record(
             self.names,
-            header=bytes.fromhex("990203aabb"),
             offsets=(5, 30, 55, 80, 105),
         )
 
@@ -151,7 +157,6 @@ class ProtocolScannerTests(unittest.TestCase):
         lowercase_name = make_record(("guild", *self.names[1:]))
         six_names = make_record(
             (*self.names, "ExtraName"),
-            header=bytes.fromhex("990203aabb"),
             offsets=(5, 55, 105, 155, 205, 255),
         )
 
